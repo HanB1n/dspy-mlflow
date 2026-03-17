@@ -1,0 +1,29 @@
+services:
+  chromadb:
+    build: ./chromadb
+    container_name: chromadb
+    ports:
+      - "8020:8000"
+    volumes:
+      - chroma_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  
+  dspy:
+    build: ./team_a_dspy
+    container_name: dspy
+    ports:
+      - "8000:8000"
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    
+networks:
+  dspy-mlflow-network:
+    driver: bridge
+
+volumes:
+  chroma_data:
