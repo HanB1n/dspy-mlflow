@@ -32,6 +32,3 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
-
-# ChromaDB
-chroma_persistent/
