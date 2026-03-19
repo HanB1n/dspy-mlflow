@@ -10,6 +10,7 @@ from team_a_dspy.services.es_client import ESClient, SAMPLE_SIZE_PER_DAY
 from team_a_dspy.services.config import settings
 
 from team_a_dspy.signatures.schema_interpreter import DataAwareSchemaInterpreter
+from team_a_dspy.signatures.es_query_generator import NLToQueryDSL
 
 IGNORED_FIELDS = ["@timestamp", "log", "event", "filename", "filename_path"]
 NUMBER_OF_DAYS = 7
@@ -35,12 +36,9 @@ class DSPYClient:
 
         # Load DSPY modules
         self.schema_interpreter = DataAwareSchemaInterpreter()
+        self.query_generator = NLToQueryDSL(chroma_client=self.chroma_client)
 
-        self.is_compiled = False
-    
-    def compile(self):
-        # Compile DSPY modules with the LLM
-        pass
+        dspy.configure(lm=self.lm)
     
     async def fetch_samples(self):
         samples = await self.es_client.get_last_x_days_samples(days=NUMBER_OF_DAYS)
@@ -81,13 +79,15 @@ class DSPYClient:
             for field_name, sample_values in field_samples.items():
                 field_type = field_types.get(field_name, "unknown")
                 interpretation = self.schema_interpreter(field_name=field_name, field_type=field_type, sample_values=list(sample_values))
-                print(f"Field: {field_name}\nType: {field_type}\nInterpretation: {interpretation}\n{'-'*40}")
+                self.chroma_client.add_documents({"field_name": field_name, "field_type": field_type, "interpretation": str(interpretation)})
                 
+async def main(query: str, dev: bool = True, init_db: bool = False):
+    dspy_client = DSPYClient(es_client=ESClient(), chroma_client=ChromaClient(dev=dev))
+    if init_db:
+        await dspy_client.interpret_field()
+    query = dspy_client.query_generator(nl_query=query)
+    print(query)
 
-
-async def main():
-    dspy_client = DSPYClient(es_client=ESClient(), chroma_client=ChromaClient(dev=True))
-    dspy_client.compile()
-    await dspy_client.interpret_field()
-
-asyncio.run(main())
+asyncio.run(
+    main(query="What are the top 10 most common locations based on sentiment mentioned in the GDELT events from the last 7 days?", init_db=False)
+    )

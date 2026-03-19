@@ -1,12 +1,6 @@
-import asyncio
-
 from chromadb import HttpClient, PersistentClient
-from langchain_chroma import Chroma
-from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from team_a_dspy.services.config import settings
-from team_a_dspy.services.es_client import ESClient
 
 
 class ChromaClient:
@@ -15,7 +9,6 @@ class ChromaClient:
     This is used to store and retrieve vector embeddings for gdelt metadata fields.
     """
     def __init__(self, dev: bool = False) -> None:
-        self.embeddings = HuggingFaceEmbeddings(model_name=settings.chroma_embedding_model)
         self.collection_name = settings.chroma_collection_name
         if dev:
             client = PersistentClient(path=settings.chroma_persistent_path)
@@ -25,28 +18,46 @@ class ChromaClient:
                 port=settings.chroma_port,
             )
 
-        self.vectorstore: Chroma = Chroma(
-            collection_name=self.collection_name,
-            embedding_function=self.embeddings,
-            client=client
+        self.collection = client.get_or_create_collection(name=self.collection_name)
+
+    def add_documents(self, interpreted_fields: list[dict] | dict) -> None:
+        """
+        Add the intepreted fields to the ChromaDB collection.
+        The interpreted fields should be a One or Many dictionaries, where each dictionary has the following structure:
+        {
+            "field_name": "field_name",
+            "field_type": "field_type",
+            "interpretation": "interpretation",
+        }
+        """
+        if isinstance(interpreted_fields, dict):
+            interpreted_fields = [interpreted_fields,]
+
+        for doc in interpreted_fields:
+            id = doc["field_name"]
+            metadata = {
+                "field_name": doc["field_name"],
+                "field_type": doc["field_type"],
+            }
+            content = doc["interpretation"]
+            self.collection.upsert(
+                ids=id,
+                metadatas=metadata,
+                documents=content,
+            )
+    
+    def query(self, query_text: str, k: int = 6) -> dict:
+        """
+        Query the ChromaDB collection for the most relevant interpretations based on the query text.
+        Returns a dictionary with the following structure:
+        {
+            "ids": [list of document ids],
+            "documents": [list of document contents],
+            "metadatas": [list of document metadatas],
+        }
+        """
+        results = self.collection.query(
+            query_texts=query_text,
+            n_results=k,
         )
-
-    async def initialize_data(self, es_client: ESClient):
-        """
-        Call this method immediately after instantiating the class to load initial data.
-        """
-        if es_client and self.vectorstore._collection.count() == 0:
-            await self.add_documents(es_client)
-
-    async def add_documents(self, es_client: ESClient):
-        """
-        Add a list of langchain.schema.Document to Chroma and persist.
-        """
-        pass
-
-    def similarity_search(self, query: str, k: int = 6) -> list[Document]:
-        """
-        Perform a similarity search against the vector store.
-        Returns a list of langchain.schema.Document.
-        """
-        return self.vectorstore.similarity_search(query, k=k)
+        return results
