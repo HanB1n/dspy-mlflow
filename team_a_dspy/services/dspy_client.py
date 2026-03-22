@@ -1,23 +1,34 @@
-import asyncio
 import dspy
 
 from collections import defaultdict
 
 from sentence_transformers.model_card import IGNORED_FIELDS
 
-from team_a_dspy.services.chroma_client import ChromaClient
-from team_a_dspy.services.es_client import ESClient, SAMPLE_SIZE_PER_DAY
-from team_a_dspy.services.config import settings
+from services.chroma_client import ChromaClient
+from services.es_client import ESClient, SAMPLE_SIZE_PER_DAY
+from services.sandbox_es_client import SandboxESClient
+from services.config import settings
 
-from team_a_dspy.signatures.schema_interpreter import DataAwareSchemaInterpreter
-from team_a_dspy.signatures.es_query_generator import NLToQueryDSL
+from signatures.schema_interpreter import DataAwareSchemaInterpreter
+from signatures.es_query_generator import NLToQueryDSL
 
 IGNORED_FIELDS = ["@timestamp", "log", "event", "filename", "filename_path"]
 NUMBER_OF_DAYS = 7
 MAX_SAMPLES_PER_FIELD = min(35, SAMPLE_SIZE_PER_DAY * NUMBER_OF_DAYS)
+DEV = settings.dev
 
 class DSPYClient:
-    def __init__(self, es_client: ESClient | None = None, chroma_client: ChromaClient | None = None):
+    """
+    Initializes and manages connections to Elasticsearch and ChromaDB,
+    configures a language model, fetches recent document samples, extracts
+    and flattens field data, interprets field schemas using a schema
+    interpreter, and stores interpretations in ChromaDB.
+    """
+    def __init__(
+            self,
+            es_client: ESClient | SandboxESClient | None = None,
+            chroma_client: ChromaClient | None = None,
+    ):
         # Initialize service clients
         if es_client:
             self.es_client = es_client
@@ -27,11 +38,15 @@ class DSPYClient:
             self.chroma_client = chroma_client
         else:
             self.chroma_client = ChromaClient()
-
+        
+        # Configure the language model with 0 temperature for deterministic outputs.
+        # For more crreative LLM outputs (e.g., for schema interpretation), we could consider using a higher temperature.
+        # See the use of with dspy.context(lm=self.lm, temperature=0.7) in the interpret_field method for an example of this.
         self.lm = dspy.LM(
             base_url=settings.llm_base_url,
             model=f"openai/{settings.llm_model_name}",
-            api_key=settings.llm_api_key
+            api_key=settings.llm_api_key,
+            temperature=0.0,
         )
 
         # Load DSPY modules
@@ -40,12 +55,25 @@ class DSPYClient:
 
         dspy.configure(lm=self.lm)
     
+    async def close(self):
+        """
+        Closes any open connections or resources held by the clients.
+        """
+        await self.es_client.close()
+
     async def fetch_samples(self):
+        """
+        Fetches samples of documents from Elasticsearch for the last NUMBER_OF_DAYS days.
+        """
         samples = await self.es_client.get_last_x_days_samples(days=NUMBER_OF_DAYS)
         return samples
     
     @staticmethod
     def flatten_field(doc: dict, field_samples: dict, prefix: str = ""):
+        """
+        Recursively flattens the fields in a document and collects sample values for each field.
+        The field_samples dictionary is updated in-place with the field names as keys and sets of sample values as values.
+        """
         for key, value in doc.items():
             if key in IGNORED_FIELDS:
                 continue
@@ -70,6 +98,10 @@ class DSPYClient:
                 field_samples[current_field].add(val_str)
                     
     async def interpret_field(self):
+        """
+        Fetches samples of documents from Elasticsearch, extracts the unique field names and sample values, and uses the schema interpreter to generate interpretations for each field. 
+        The interpretations are then stored in ChromaDB.
+        """
         samples = await self.fetch_samples()
         field_samples = defaultdict(set)
         for doc in samples:
@@ -80,14 +112,16 @@ class DSPYClient:
                 field_type = field_types.get(field_name, "unknown")
                 interpretation = self.schema_interpreter(field_name=field_name, field_type=field_type, sample_values=list(sample_values))
                 self.chroma_client.add_documents({"field_name": field_name, "field_type": field_type, "interpretation": str(interpretation)})
-                
-async def main(query: str, dev: bool = True, init_db: bool = False):
-    dspy_client = DSPYClient(es_client=ESClient(), chroma_client=ChromaClient(dev=dev))
-    if init_db:
-        await dspy_client.interpret_field()
-    query = dspy_client.query_generator(nl_query=query)
-    print(query)
 
-asyncio.run(
-    main(query="What are the top 10 most common locations based on sentiment mentioned in the GDELT events from the last 7 days?", init_db=False)
-    )
+    async def startup(self):
+        """
+        Performs any necessary startup initialization, such as interpreting fields and populating ChromaDB.
+        """
+        await self.interpret_field()     
+
+    def generate_query_dsl(self, query_text: str) -> dict:
+        """
+        Generates a query DSL based on the input natural language query text using the query generator.
+        """
+        query_dsl = self.query_generator(nl_query=query_text)
+        return query_dsl

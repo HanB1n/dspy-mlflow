@@ -1,7 +1,6 @@
 import dspy
-from sympy import re
 
-from team_a_dspy.services.chroma_client import ChromaClient
+from services.chroma_client import ChromaClient
 
 class SchemaInterpreter(dspy.Signature):
     """

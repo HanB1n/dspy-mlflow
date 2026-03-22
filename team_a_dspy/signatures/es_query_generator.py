@@ -1,7 +1,7 @@
 import dspy
 
-from team_a_dspy.services.chroma_client import ChromaClient
-from team_a_dspy.signatures.schema_interpreter import SchemaRetriever
+from services.chroma_client import ChromaClient
+from signatures.schema_interpreter import SchemaRetriever
 
 class NLToQueryDSL(dspy.Module):
     def __init__(self, chroma_client: ChromaClient):
@@ -10,9 +10,11 @@ class NLToQueryDSL(dspy.Module):
         self.generate_query = dspy.ChainOfThought(NLToQuerySignature)
         self.schema_retriever = SchemaRetriever(chroma_client=chroma_client)
 
-    def forward(self, nl_query: str) -> dspy.Prediction:
+    def forward(self, nl_query: str) -> dict:
         es_schema = self.schema_retriever(nl_query=nl_query)
-        return self.generate_query(nl_query=nl_query, es_schema=es_schema)
+        generated_query = self.generate_query(nl_query=nl_query, es_schema=es_schema)
+        print(f"Reasoning trace for query generation:{generated_query.reasoning}")
+        return generated_query.query_dsl
     
 class NLToQuerySignature(dspy.Signature):
     """

@@ -1,9 +1,6 @@
 import asyncio
-from re import S
-from typing import Coroutine
-from urllib import response
 
-from team_a_dspy.services.config import settings
+from services.config import settings
 
 from elasticsearch import AsyncElasticsearch
 
@@ -14,15 +11,16 @@ class ESClient:
     Client for interacting with Elasticsearch.
     This is used to store and retrieve raw gdelt metadata fields for filtering and retrieval.
     """
-    def __init__(self) -> None:
+    def __init__(self, host: str, username: str, password: str, index: str, verify_ssl: bool) -> None:
         self.es = AsyncElasticsearch(
-            hosts=[settings.es_host],
-            basic_auth=(settings.es_username, settings.es_password),
-            verify_certs=settings.es_verify_ssl
+            hosts=[host],
+            basic_auth=(username, password),
+            verify_certs=verify_ssl,
         )
+        self.index = index
     
     async def get_mapping(self):
-        return await self.es.indices.get_mapping(index=settings.es_index)
+        return await self.es.indices.get_mapping(index=self.index)
     
     async def get_last_x_days_samples(self, days: int, date_field: str = "@timestamp") -> list[dict]:
         """
@@ -50,7 +48,7 @@ class ESClient:
                     }
                 }
             }
-            tasks.append(self.es.search(index=settings.es_index, body=query))
+            tasks.append(self.es.search(index=self.index, body=query))
         
         results = await asyncio.gather(*tasks)
         all_sampled_docs = []
@@ -106,3 +104,22 @@ class ESClient:
         extract_properties(properties)
         
         return flat_fields
+    
+    async def search(self, query_dsl: dict) -> dict:
+        """
+        Executes a search query against Elasticsearch using the provided Query DSL.
+        
+        Args:
+            query_dsl (dict): The Elasticsearch Query DSL to be executed.
+        Returns:
+            dict: The search results returned by Elasticsearch.
+        """
+        query = query_dsl.get("query_dsl", {})
+        response = await self.es.search(index=self.index, body=query)
+        return response.body
+    
+    async def close(self):
+        """
+        Closes the Elasticsearch client connection.
+        """
+        await self.es.close()

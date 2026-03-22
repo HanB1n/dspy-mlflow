@@ -1,6 +1,6 @@
 from chromadb import HttpClient, PersistentClient
 
-from team_a_dspy.services.config import settings
+from services.config import settings
 
 
 class ChromaClient:

@@ -5,20 +5,40 @@ services:
     ports:
       - "8020:8000"
     volumes:
-      - chroma_data:/data
+      - ./chromadb/chroma_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
       interval: 10s
       timeout: 5s
       retries: 20
-  
+      
+  sandbox_elasticsearch:
+    build: ./sandbox_es
+    container_name: sandbox_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./sandbox_es/sandbox_es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   dspy:
     build: ./team_a_dspy
     container_name: dspy
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     depends_on:
       chromadb:
+        condition: service_healthy
+      sandbox_elasticsearch:
         condition: service_healthy
     
 networks:
@@ -27,3 +47,7 @@ networks:
 
 volumes:
   chroma_data:
+    driver: local
+  sandbox_es_data:
+    driver: local
+  
