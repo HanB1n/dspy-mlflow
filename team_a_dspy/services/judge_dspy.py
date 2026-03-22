@@ -1,8 +1,6 @@
-from services.dspy_client import DSPYClient
-from services.chroma_client import ChromaClient
 from services.sandbox_es_client import SandboxESClient
 
-class JudgeDSPY(DSPYClient):
+class JudgeDSPY:
     """
     JudgeDSPY is a specialized client that inherits from DSPYClient and is designed to evaluate the quality of generated Elasticsearch Query DSL against a natural language query and the ES schema.
     It uses a language model to compare the generated Query DSL with the expected output based on the natural language query and the ES schema, and provides feedback on the accuracy and relevance of the generated Query DSL.
@@ -10,9 +8,8 @@ class JudgeDSPY(DSPYClient):
     def __init__(
             self,
             sandbox_es_client: SandboxESClient,
-            chroma_client: ChromaClient,
     ):
-        super().__init__(es_client=sandbox_es_client, chroma_client=chroma_client)
+        self.es_client = sandbox_es_client
     
     async def evaluate_query_dsl(self, generated_query_dsl: dict) -> dict:
         """

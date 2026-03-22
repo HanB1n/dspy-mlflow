@@ -1,12 +1,12 @@
 import dspy
 
 from collections import defaultdict
-
 from sentence_transformers.model_card import IGNORED_FIELDS
 
 from services.chroma_client import ChromaClient
 from services.es_client import ESClient, SAMPLE_SIZE_PER_DAY
 from services.sandbox_es_client import SandboxESClient
+from services.judge_dspy import JudgeDSPY
 from services.config import settings
 
 from signatures.schema_interpreter import DataAwareSchemaInterpreter
@@ -26,18 +26,14 @@ class DSPYClient:
     """
     def __init__(
             self,
-            es_client: ESClient | SandboxESClient | None = None,
-            chroma_client: ChromaClient | None = None,
+            es_client: ESClient | SandboxESClient,
+            chroma_client: ChromaClient,
+            judge_dspy: JudgeDSPY
     ):
         # Initialize service clients
-        if es_client:
-            self.es_client = es_client
-        else:
-            self.es_client = ESClient()
-        if chroma_client:
-            self.chroma_client = chroma_client
-        else:
-            self.chroma_client = ChromaClient()
+        self.es_client = es_client
+        self.chroma_client = chroma_client
+        self.judge_dspy = judge_dspy
         
         # Configure the language model with 0 temperature for deterministic outputs.
         # For more crreative LLM outputs (e.g., for schema interpretation), we could consider using a higher temperature.
@@ -51,7 +47,7 @@ class DSPYClient:
 
         # Load DSPY modules
         self.schema_interpreter = DataAwareSchemaInterpreter()
-        self.query_generator = NLToQueryDSL(chroma_client=self.chroma_client)
+        self.query_generator = NLToQueryDSL(chroma_client=self.chroma_client, dspy_judge=judge_dspy)
 
         dspy.configure(lm=self.lm)
     
@@ -119,9 +115,9 @@ class DSPYClient:
         """
         await self.interpret_field()     
 
-    def generate_query_dsl(self, query_text: str) -> dict:
+    async def generate_query_dsl(self, query_text: str) -> dict:
         """
         Generates a query DSL based on the input natural language query text using the query generator.
         """
-        query_dsl = self.query_generator(nl_query=query_text)
+        query_dsl = await self.query_generator(nl_query=query_text)
         return query_dsl
