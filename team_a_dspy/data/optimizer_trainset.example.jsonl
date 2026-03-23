@@ -1,2 +1,0 @@
-{"nl_query": "Show the 10 most recent documents", "expected_query_dsl": {"size": 10, "sort": [{"@timestamp": {"order": "desc"}}]}}
-{"nl_query": "Find documents where actor1countrycode is US", "expected_query_dsl": {"query": {"term": {"actor1countrycode": "US"}}}}

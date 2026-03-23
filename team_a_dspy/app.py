@@ -1,5 +1,5 @@
 from elasticsearch import helpers
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status, BackgroundTasks
 from fastapi.concurrency import asynccontextmanager
 from pydantic import BaseModel
 
@@ -9,6 +9,12 @@ from services.chroma_client import ChromaClient
 from services.sandbox_es_client import SandboxESClient
 from services.config import settings
 from services.judge_dspy import JudgeDSPY
+
+import mlflow
+import nest_asyncio
+from mlflow.genai.scorers import Correctness
+
+nest_asyncio.apply()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -65,12 +71,101 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query_dsl: dict
 
+def run_mlflow_eval(dspy_client, query_text: str):
+    mlflow.set_tracking_uri("http://mlflow:5000")
+    mlflow.set_experiment(experiment_id="0")
+    eval_dataset = [{
+        "inputs": {"query_text": "Which is the safest country in the Middle East to travel to last week and provide figures?"},
+        "expectations": {
+            "generated_dsl_query": {
+            "size": 0,
+            "query": {
+                "bool": {
+                "must": [
+                    {
+                    "terms": {
+                        "V2Locations.CountryCode.keyword": [
+                        "IS",
+                        "IZ",
+                        "JO",
+                        "SA",
+                        "AE",
+                        "QA",
+                        "KW",
+                        "OM",
+                        "BH",
+                        "LB",
+                        "SY",
+                        "YM",
+                        "IR",
+                        "TU"
+                        ]
+                    }
+                    },
+                    {
+                    "range": {
+                        "V21Date": {
+                        "gte": "now-7d/d",
+                        "lte": "now/d"
+                        }
+                    }
+                    }
+                ]
+                }
+            },
+            "aggs": {
+                "by_country": {
+                "terms": {
+                    "field": "V2Locations.CountryCode.keyword",
+                    "size": 20
+                },
+                "aggs": {
+                    "avg_tone": {
+                    "avg": {
+                        "field": "V15Tone.Tone"
+                    }
+                    },
+                    "avg_negative_score": {
+                    "avg": {
+                        "field": "V15Tone.NegativeScore"
+                    }
+                    },
+                    "avg_positive_score": {
+                    "avg": {
+                        "field": "V15Tone.PositiveScore"
+                    }
+                    },
+                    "conflict_articles": {
+                    "filter": {
+                        "terms": {
+                        "V2EnhancedThemes.V2Theme": [
+                            "ARMEDCONFLICT",
+                            "CRISISLEX_CRISISLEXREC",
+                            "MILITARY"
+                        ]
+                        }
+                    }
+                    }
+                }
+                }
+            }
+            }
+        }
+    }]
+    mlflow.genai.evaluate(
+        data=eval_dataset,
+        predict_fn=dspy_client.generate_query_dsl,
+        scorers=[Correctness()],
+    )
+
 @app.post("/generate_query", response_model=QueryResponse, dependencies=[Depends(require_dev_mode)])
 async def generate_query(
     query: QueryRequest,
+    background_tasks: BackgroundTasks,
     dspy_client: DSPYClient = Depends(get_dspy_client)
 ):
     query_dsl = await dspy_client.generate_query_dsl(query.query_text)
+    background_tasks.add_task(run_mlflow_eval, dspy_client, query.query_text)
     return QueryResponse(query_dsl=query_dsl)
 
 @app.post("/evaluate_query", response_model=dict, dependencies=[Depends(require_dev_mode)])
@@ -117,6 +212,14 @@ async def initialize(
 
     await push_to_dev_es(sandbox_es_client, sample_docs)
     return {"status": "initialized"}
+
+@app.get("/load_example", dependencies=[Depends(require_dev_mode)])
+async def load_example(
+    dspy_client: DSPYClient = Depends(get_dspy_client)
+):
+    example_query = "Find all events related to natural disasters in 2020."
+    query_dsl = await dspy_client.generate_query_dsl(example_query)
+    return {"query": example_query, "generated_query_dsl": query_dsl}
 
 @app.get("/health")
 async def health_check():
