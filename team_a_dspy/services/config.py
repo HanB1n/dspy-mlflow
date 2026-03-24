@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     llm_api_key: str
     max_result_docs: int = 20
     max_agg_buckets: int = 50
+
+    # MLflow
+    mlflow_tracking_uri: str = "http://mlflow:5000"
+    mlflow_experiment_name: str = "dspy-genai"
+    mlflow_enable_dspy_autolog: bool = True
     
     # Other settings
     dev: bool = True

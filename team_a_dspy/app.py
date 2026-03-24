@@ -11,13 +11,19 @@ from services.config import settings
 from services.judge_dspy import JudgeDSPY
 
 import mlflow
-import nest_asyncio
+import time
 from mlflow.genai.scorers import Correctness
 
-nest_asyncio.apply()
+
+def setup_mlflow(*, enable_dspy_autolog: bool = False) -> None:
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    mlflow.set_experiment(settings.mlflow_experiment_name)
+    if enable_dspy_autolog and settings.mlflow_enable_dspy_autolog:
+        mlflow.dspy.autolog()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_mlflow(enable_dspy_autolog=True)
     # Initialize clients and store them in app state
     es_client = ESClient(
         host=settings.es_host,
@@ -71,101 +77,18 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query_dsl: dict
 
-def run_mlflow_eval(dspy_client, query_text: str):
-    mlflow.set_tracking_uri("http://mlflow:5000")
-    mlflow.set_experiment(experiment_id="0")
-    eval_dataset = [{
-        "inputs": {"query_text": "Which is the safest country in the Middle East to travel to last week and provide figures?"},
-        "expectations": {
-            "generated_dsl_query": {
-            "size": 0,
-            "query": {
-                "bool": {
-                "must": [
-                    {
-                    "terms": {
-                        "V2Locations.CountryCode.keyword": [
-                        "IS",
-                        "IZ",
-                        "JO",
-                        "SA",
-                        "AE",
-                        "QA",
-                        "KW",
-                        "OM",
-                        "BH",
-                        "LB",
-                        "SY",
-                        "YM",
-                        "IR",
-                        "TU"
-                        ]
-                    }
-                    },
-                    {
-                    "range": {
-                        "V21Date": {
-                        "gte": "now-7d/d",
-                        "lte": "now/d"
-                        }
-                    }
-                    }
-                ]
-                }
-            },
-            "aggs": {
-                "by_country": {
-                "terms": {
-                    "field": "V2Locations.CountryCode.keyword",
-                    "size": 20
-                },
-                "aggs": {
-                    "avg_tone": {
-                    "avg": {
-                        "field": "V15Tone.Tone"
-                    }
-                    },
-                    "avg_negative_score": {
-                    "avg": {
-                        "field": "V15Tone.NegativeScore"
-                    }
-                    },
-                    "avg_positive_score": {
-                    "avg": {
-                        "field": "V15Tone.PositiveScore"
-                    }
-                    },
-                    "conflict_articles": {
-                    "filter": {
-                        "terms": {
-                        "V2EnhancedThemes.V2Theme": [
-                            "ARMEDCONFLICT",
-                            "CRISISLEX_CRISISLEXREC",
-                            "MILITARY"
-                        ]
-                        }
-                    }
-                    }
-                }
-                }
-            }
-            }
-        }
-    }]
-    mlflow.genai.evaluate(
-        data=eval_dataset,
-        predict_fn=dspy_client.generate_query_dsl,
-        scorers=[Correctness()],
-    )
 
 @app.post("/generate_query", response_model=QueryResponse, dependencies=[Depends(require_dev_mode)])
 async def generate_query(
     query: QueryRequest,
-    background_tasks: BackgroundTasks,
     dspy_client: DSPYClient = Depends(get_dspy_client)
 ):
-    query_dsl = dspy_client.generate_query_dsl(query.query_text)
-    background_tasks.add_task(run_mlflow_eval, dspy_client, query.query_text)
+    start_time = time.perf_counter()
+    with mlflow.start_run(run_name="generate_query"):
+        query_dsl = dspy_client.generate_query_dsl(query.query_text)
+        mlflow.log_param("query_text", query.query_text)
+        mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_metric("dsl_size_chars", len(str(query_dsl)))
     return QueryResponse(query_dsl=query_dsl)
 
 @app.post("/evaluate_query", response_model=dict, dependencies=[Depends(require_dev_mode)])
@@ -173,7 +96,11 @@ async def evaluate_query(
     query: QueryResponse,
     dspy_judge: JudgeDSPY = Depends(get_dspy_judge)
 ):
-    evaluation_result = dspy_judge.evaluate_query_dsl(generated_query_dsl=query.query_dsl)
+    start_time = time.perf_counter()
+    with mlflow.start_run(run_name="evaluate_query"):
+        evaluation_result = dspy_judge.evaluate_query_dsl(generated_query_dsl=query.query_dsl)
+        mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_metric("is_valid", 1 if evaluation_result.get("is_valid") else 0)
     return evaluation_result
 
 @app.post("/search", response_model=dict)
@@ -182,8 +109,14 @@ async def search(
     dspy_client: DSPYClient = Depends(get_dspy_client),
     es_client: ESClient = Depends(get_es_client)
 ):
-    query_dsl = dspy_client.generate_query_dsl(query.query_text)
-    search_results = es_client.search(query_dsl=query_dsl)
+    start_time = time.perf_counter()
+    with mlflow.start_run(run_name="search"):
+        query_dsl = dspy_client.generate_query_dsl(query.query_text)
+        search_results = es_client.search(query_dsl=query_dsl)
+        hits = search_results.get("hits", {}).get("hits", [])
+        mlflow.log_param("query_text", query.query_text)
+        mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_metric("hits_count", len(hits))
     return search_results
 
 @app.get("/initialize", dependencies=[Depends(require_dev_mode)])

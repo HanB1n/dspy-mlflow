@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 
 import dspy
+import mlflow
 
 # Allow running this file directly from anywhere in the repo.
 THIS_FILE = Path(__file__).resolve()
@@ -97,6 +98,10 @@ def main() -> None:
         )
 
     configure_lm()
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    mlflow.set_experiment(settings.mlflow_experiment_name)
+    if settings.mlflow_enable_dspy_autolog:
+        mlflow.dspy.autolog()
 
     chroma_client = ChromaClient(dev=settings.dev)
     student = OptimizableNLToQueryDSL(chroma_client=chroma_client)
@@ -106,10 +111,23 @@ def main() -> None:
         raise ValueError("Trainset is empty. Add at least one JSONL row.")
 
     teleprompter = dspy.BootstrapFewShot(metric=metric_exact_query_dsl)
-    optimized_program = teleprompter.compile(student=student, trainset=trainset)
+    with mlflow.start_run(run_name="optimize_query_generator"):
+        mlflow.log_param("trainset_path", str(trainset_path))
+        mlflow.log_param("trainset_size", len(trainset))
+        mlflow.log_param("output_path", str(output_path))
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized_program.save(str(output_path))
+        optimized_program = teleprompter.compile(student=student, trainset=trainset)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        optimized_program.save(str(output_path))
+        mlflow.log_artifact(str(output_path), artifact_path="optimizer_artifacts")
+
+        model_info = mlflow.dspy.log_model(
+            optimized_program,
+            name="nl_to_query_dsl",
+            input_example="Find natural disaster events in 2020",
+        )
+        mlflow.log_param("logged_model_uri", model_info.model_uri)
 
     print(f"Optimization complete. Saved artifact to: {output_path}")
 
