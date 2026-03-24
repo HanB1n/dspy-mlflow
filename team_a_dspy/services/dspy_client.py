@@ -51,17 +51,17 @@ class DSPYClient:
 
         dspy.configure(lm=self.lm)
     
-    async def close(self):
+    def close(self):
         """
         Closes any open connections or resources held by the clients.
         """
-        await self.es_client.close()
+        self.es_client.close()
 
-    async def fetch_samples(self):
+    def fetch_samples(self):
         """
         Fetches samples of documents from Elasticsearch for the last NUMBER_OF_DAYS days.
         """
-        samples = await self.es_client.get_last_x_days_samples(days=NUMBER_OF_DAYS)
+        samples = self.es_client.get_last_x_days_samples(days=NUMBER_OF_DAYS)
         return samples
     
     @staticmethod
@@ -93,31 +93,31 @@ class DSPYClient:
             if len(field_samples[current_field]) < MAX_SAMPLES_PER_FIELD:
                 field_samples[current_field].add(val_str)
                     
-    async def interpret_field(self):
+    def interpret_field(self):
         """
         Fetches samples of documents from Elasticsearch, extracts the unique field names and sample values, and uses the schema interpreter to generate interpretations for each field. 
         The interpretations are then stored in ChromaDB.
         """
-        samples = await self.fetch_samples()
+        samples = self.fetch_samples()
         field_samples = defaultdict(set)
         for doc in samples:
             self.flatten_field(doc, field_samples)
-        field_types = await self.es_client.flatten_es_mapping()
+        field_types = self.es_client.flatten_es_mapping()
         with dspy.context(lm=self.lm):
             for field_name, sample_values in field_samples.items():
                 field_type = field_types.get(field_name, "unknown")
                 interpretation = self.schema_interpreter(field_name=field_name, field_type=field_type, sample_values=list(sample_values))
                 self.chroma_client.add_documents({"field_name": field_name, "field_type": field_type, "interpretation": str(interpretation)})
 
-    async def startup(self):
+    def startup(self):
         """
         Performs any necessary startup initialization, such as interpreting fields and populating ChromaDB.
         """
-        await self.interpret_field()     
+        self.interpret_field()     
 
-    async def generate_query_dsl(self, query_text: str) -> dict:
+    def generate_query_dsl(self, query_text: str) -> dict:
         """
         Generates a query DSL based on the input natural language query text using the query generator.
         """
-        query_dsl = await self.query_generator(nl_query=query_text)
+        query_dsl = self.query_generator(nl_query=query_text)
         return query_dsl

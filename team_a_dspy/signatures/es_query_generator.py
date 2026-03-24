@@ -13,13 +13,13 @@ class NLToQueryDSL(dspy.Module):
         self.dspy_judge = dspy_judge
         self.refiner = dspy.ChainOfThought(RefinerSignature)
 
-    async def forward(self, nl_query: str) -> dict:
+    def forward(self, nl_query: str) -> dict:
         es_schema = self.schema_retriever(nl_query=nl_query)
         generated_query = self.generate_query(nl_query=nl_query, es_schema=es_schema)
         current_query_dsl = generated_query.query_dsl
         print(f"Reasoning trace for query generation:{generated_query.reasoning}")
 
-        response = await self.dspy_judge.evaluate_query_dsl(current_query_dsl)
+        response = self.dspy_judge.evaluate_query_dsl(current_query_dsl)
 
         for attempt in range(3):
             print(f"Validation attempt {attempt+1}: is_valid={response['is_valid']}, feedback={response['feedback']}")

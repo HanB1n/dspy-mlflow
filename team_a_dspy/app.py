@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     yield
     # Cleanup if necessary (e.g., close connections)
     
-    await dpsy_client.close()
+    dpsy_client.close()
 
 def get_dspy_client(request: Request) -> DSPYClient:
     return request.app.state.dspy_client
@@ -164,7 +164,7 @@ async def generate_query(
     background_tasks: BackgroundTasks,
     dspy_client: DSPYClient = Depends(get_dspy_client)
 ):
-    query_dsl = await dspy_client.generate_query_dsl(query.query_text)
+    query_dsl = dspy_client.generate_query_dsl(query.query_text)
     background_tasks.add_task(run_mlflow_eval, dspy_client, query.query_text)
     return QueryResponse(query_dsl=query_dsl)
 
@@ -173,7 +173,7 @@ async def evaluate_query(
     query: QueryResponse,
     dspy_judge: JudgeDSPY = Depends(get_dspy_judge)
 ):
-    evaluation_result = await dspy_judge.evaluate_query_dsl(generated_query_dsl=query.query_dsl)
+    evaluation_result = dspy_judge.evaluate_query_dsl(generated_query_dsl=query.query_dsl)
     return evaluation_result
 
 @app.post("/search", response_model=dict)
@@ -182,8 +182,8 @@ async def search(
     dspy_client: DSPYClient = Depends(get_dspy_client),
     es_client: ESClient = Depends(get_es_client)
 ):
-    query_dsl = await dspy_client.generate_query_dsl(query.query_text)
-    search_results = await es_client.search(query_dsl=query_dsl)
+    query_dsl = dspy_client.generate_query_dsl(query.query_text)
+    search_results = es_client.search(query_dsl=query_dsl)
     return search_results
 
 @app.get("/initialize", dependencies=[Depends(require_dev_mode)])
@@ -191,9 +191,9 @@ async def initialize(
     sandbox_es_client: SandboxESClient = Depends(get_sandbox_es_client),
     dspy_client: DSPYClient = Depends(get_dspy_client)
 ):
-    await dspy_client.startup()
-    sample_docs = await dspy_client.fetch_samples()
-    async def push_to_dev_es(sandbox_es_client: SandboxESClient, docs: list[dict]):
+    dspy_client.startup()
+    sample_docs = dspy_client.fetch_samples()
+    def push_to_dev_es(sandbox_es_client: SandboxESClient, docs: list[dict]):
         """
         Pushes the sample documents to the sandbox ES instance.
         """
@@ -207,10 +207,10 @@ async def initialize(
             }
             for doc in docs
         ]
-        success, failed = await helpers.async_bulk(sandbox_es_client.es, actions)
+        success, failed = helpers.bulk(sandbox_es_client.es, actions)
         print(f"Succeeded: {success}, Failed: {failed}")
 
-    await push_to_dev_es(sandbox_es_client, sample_docs)
+    push_to_dev_es(sandbox_es_client, sample_docs)
     return {"status": "initialized"}
 
 @app.get("/load_example", dependencies=[Depends(require_dev_mode)])
@@ -218,7 +218,7 @@ async def load_example(
     dspy_client: DSPYClient = Depends(get_dspy_client)
 ):
     example_query = "Find all events related to natural disasters in 2020."
-    query_dsl = await dspy_client.generate_query_dsl(example_query)
+    query_dsl = dspy_client.generate_query_dsl(example_query)
     return {"query": example_query, "generated_query_dsl": query_dsl}
 
 @app.get("/health")

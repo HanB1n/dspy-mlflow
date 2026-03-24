@@ -1,8 +1,6 @@
-import asyncio
-
 from services.config import settings
 
-from elasticsearch import AsyncElasticsearch
+from elasticsearch import Elasticsearch
 
 SAMPLE_SIZE_PER_DAY = 5
 
@@ -12,21 +10,21 @@ class ESClient:
     This is used to store and retrieve raw gdelt metadata fields for filtering and retrieval.
     """
     def __init__(self, host: str, username: str, password: str, index: str, verify_ssl: bool) -> None:
-        self.es = AsyncElasticsearch(
+        self.es = Elasticsearch(
             hosts=[host],
             basic_auth=(username, password),
             verify_certs=verify_ssl,
         )
         self.index = index
     
-    async def get_mapping(self):
-        return await self.es.indices.get_mapping(index=self.index)
+    def get_mapping(self):
+        return self.es.indices.get_mapping(index=self.index)
     
-    async def get_last_x_days_samples(self, days: int, date_field: str = "@timestamp") -> list[dict]:
+    def get_last_x_days_samples(self, days: int, date_field: str = "@timestamp") -> list[dict]:
         """
         Pulls 20 random documents for each of the past 7 days using the @timestamp field for date filtering.
         """
-        tasks = []
+        results = []
         for days_ago in range(1, days + 1):
             start_date = f"now-{days_ago}d/d"
             end_date = f"now-{days_ago - 1}d/d"
@@ -48,16 +46,15 @@ class ESClient:
                     }
                 }
             }
-            tasks.append(self.es.search(index=self.index, body=query))
+            results.append(self.es.search(index=self.index, body=query))
         
-        results = await asyncio.gather(*tasks)
         all_sampled_docs = []
         for day_result in results:
             hits = day_result.get("hits", {}).get("hits", [])
             all_sampled_docs.extend([hit["_source"] for hit in hits])
         return all_sampled_docs
     
-    async def flatten_es_mapping(self) -> dict:
+    def flatten_es_mapping(self) -> dict:
         """
         Flattens an Elasticsearch mapping payload into a {"field.path": "type"} dictionary.
         """
@@ -66,7 +63,7 @@ class ESClient:
         # Since the payload contains multiple indices (e.g., 'gkg-2026.03.16', 'gkg-2026.03.07'),
         # we just need to grab the properties from the FIRST index. 
         # (Assuming all daily indices share the same mapping).
-        mapping = await self.get_mapping()
+        mapping = self.get_mapping()
         first_index = list(mapping.keys())[0] # type: ignore
         
         # Drill down to the actual 'properties' block
@@ -105,7 +102,7 @@ class ESClient:
         
         return flat_fields
     
-    async def search(self, query_dsl: dict) -> dict:
+    def search(self, query_dsl: dict) -> dict:
         """
         Executes a search query against Elasticsearch using the provided Query DSL.
         
@@ -115,11 +112,11 @@ class ESClient:
             dict: The search results returned by Elasticsearch.
         """
         query = query_dsl.get("query_dsl", {})
-        response = await self.es.search(index=self.index, body=query)
+        response = self.es.search(index=self.index, body=query)
         return response.body
     
-    async def close(self):
+    def close(self):
         """
         Closes the Elasticsearch client connection.
         """
-        await self.es.close()
+        self.es.close()

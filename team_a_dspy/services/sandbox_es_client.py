@@ -9,7 +9,7 @@ class SandboxESClient(ESClient):
     def __init__(self):
         super().__init__(settings.sandbox_es_host, settings.sandbox_es_username, settings.sandbox_es_password, settings.sandbox_es_index, settings.sandbox_es_verify_ssl)
 
-    async def validate_query_dsl(self, query_dsl: dict):
+    def validate_query_dsl(self, query_dsl: dict):
         """
         Validates the generated Query DSL by executing it against the sandbox ES instance and checking for errors.
         
@@ -18,7 +18,7 @@ class SandboxESClient(ESClient):
         Returns:
             dict: A dictionary containing the validation results, including whether the query is valid and any feedback or error messages from Elasticsearch.
         """
-        response = await self.es.indices.validate_query(
+        response = self.es.indices.validate_query(
             index=self.index,
             body=query_dsl.get("query_dsl", {}),
             explain=True

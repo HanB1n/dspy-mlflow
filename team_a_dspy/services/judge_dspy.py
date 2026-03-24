@@ -11,7 +11,7 @@ class JudgeDSPY:
     ):
         self.es_client = sandbox_es_client
     
-    async def evaluate_query_dsl(self, generated_query_dsl: dict) -> dict:
+    def evaluate_query_dsl(self, generated_query_dsl: dict) -> dict:
         """
         Evaluates the generated Query DSL against the natural language query and the ES schema.
         
@@ -21,4 +21,4 @@ class JudgeDSPY:
         Returns:
             dict: A dictionary containing the evaluation results, including accuracy, relevance, and feedback for improvement.
         """
-        return await self.es_client.validate_query_dsl(query_dsl=generated_query_dsl)
+        return self.es_client.validate_query_dsl(query_dsl=generated_query_dsl)
