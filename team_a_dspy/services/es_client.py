@@ -1,6 +1,6 @@
 from services.config import settings
 
-from elasticsearch import Elasticsearch
+from elasticsearch import BadRequestError, Elasticsearch
 
 SAMPLE_SIZE_PER_DAY = 5
 
@@ -122,6 +122,48 @@ class ESClient:
         response = self.es.search(index=self.index, body=query)
         return response.body
     
+    def validate_query_dsl(self, query_dsl: dict):
+        """
+        Validates the generated Query DSL by executing it against the sandbox ES instance and checking for errors.
+        
+        Args:
+            query_dsl (dict): The generated Elasticsearch Query DSL to be validated.
+                Can be either wrapped as {"query_dsl": {...}} or raw DSL directly.
+        Returns:
+            dict: A dictionary containing the validation results, including whether the query is valid and any feedback or error messages from Elasticsearch.
+        """
+        # Handle both wrapped ("query_dsl" key) and unwrapped (raw DSL) formats
+        if "query_dsl" in query_dsl:
+            query = query_dsl["query_dsl"]
+        else:
+            query = query_dsl
+        
+        try:
+            response = self.es.search(index=self.index, body=query)
+            failed_shards = response.body.get("_shards", {}).get("failed", 0)
+            if failed_shards:
+                failures = response.body.get("_shards", {}).get("failures", [])
+                return {
+                    "is_valid": False,
+                    "feedback": f"Shard failures detected: {failures}",
+                }
+            return {
+                "is_valid": True,
+                "feedback": "Query executed successfully in sandbox Elasticsearch.",
+            }
+        except BadRequestError as exc:
+            error_text = str(exc)
+            return {
+                "is_valid": False,
+                "feedback": error_text,
+            }
+        except Exception as exc:
+            return {
+                "is_valid": False,
+                "feedback": f"Unexpected validation error: {exc}",
+            }
+
+
     def close(self):
         """
         Closes the Elasticsearch client connection.

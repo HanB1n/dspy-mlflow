@@ -35,7 +35,8 @@ async def lifespan(app: FastAPI):
     chroma_client = ChromaClient(dev=False)
     sandbox_es_client = SandboxESClient()
 
-    dspy_judge = JudgeDSPY(sandbox_es_client=sandbox_es_client)
+    # Validate generated DSL against the same ES target used for actual search execution.
+    dspy_judge = JudgeDSPY(es_client=es_client)
     dpsy_client = DSPYClient(es_client=es_client, chroma_client=chroma_client, judge_dspy=dspy_judge)
     
 
@@ -93,7 +94,7 @@ async def generate_query(
         query_dsl = dspy_client.generate_query_dsl(query.query_text)
         mlflow.log_param("query_text", query.query_text)
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
-        mlflow.log_metric("dsl_size_chars", len(str(query_dsl)))
+        mlflow.log_dict(query_dsl, "generated_query_dsl.json")
     return QueryResponse(query_dsl=query_dsl)
 
 @app.post("/evaluate_query", response_model=dict, dependencies=[Depends(require_dev_mode)])
@@ -106,6 +107,7 @@ async def evaluate_query(
         evaluation_result = dspy_judge._evaluate_query_dsl_syntax(generated_query_dsl=query.query_dsl)
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
         mlflow.log_metric("is_valid", 1 if evaluation_result.get("is_valid") else 0)
+        mlflow.log_param("feedback", evaluation_result.get("feedback", ""))
     return evaluation_result
 
 @app.post("/search", response_model=dict)
@@ -121,6 +123,7 @@ async def search(
         hits = search_results.get("hits", {}).get("hits", [])
         mlflow.log_param("query_text", query.query_text)
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_dict(query_dsl, "executed_query_dsl.json")
         mlflow.log_metric("hits_count", len(hits))
     return search_results
 
@@ -139,7 +142,8 @@ async def search_and_aggregate(
         aggregations = judge_dspy._aggregate_es_documents(docs)
         mlflow.log_param("query_text", query.query_text)
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
-        mlflow.log_metric("aggregations_count", len(aggregations))
+        mlflow.log_dict(query_dsl, "executed_query_dsl.json")
+        mlflow.log_dict(aggregations, "aggregations.json")
     return aggregations
 
 @app.post("/evaluate_relevance", response_model=dict)
@@ -160,6 +164,8 @@ async def evaluate_relevance(
         relevance_evaluation = judge_dspy.compute_relevance_score(nl_query=query.query_text, aggregation=aggregations)
         mlflow.log_param("query_text", query.query_text)
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_dict(query_dsl, "executed_query_dsl.json")
+        mlflow.log_dict(aggregations, "aggregations.json")
         mlflow.log_metric("relevance_score", relevance_evaluation.get("relevance_score", 0))
     return relevance_evaluation
 

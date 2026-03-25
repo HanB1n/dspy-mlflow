@@ -17,18 +17,22 @@ class NLToQueryDSL(dspy.Module):
         es_schema = self.schema_retriever(nl_query=nl_query)
         generated_query = self.generate_query(nl_query=nl_query, es_schema=es_schema)
         current_query_dsl = generated_query.query_dsl
-        print(f"Reasoning trace for query generation:{generated_query.reasoning}")
-
-        response = self.dspy_judge._evaluate_query_dsl_syntax(current_query_dsl)
 
         for attempt in range(3):
+            response = self.dspy_judge._evaluate_query_dsl_syntax(current_query_dsl)
             print(f"Validation attempt {attempt+1}: is_valid={response['is_valid']}, feedback={response['feedback']}")
+            print(f"Current Query DSL: {current_query_dsl}")
             if response['is_valid']:
-                return current_query_dsl
-            refined_query = self.refiner(nl_query=nl_query, es_schema=es_schema, failed_query_dsl=generated_query.query_dsl, feedback=response['feedback'])
+                return dspy.Prediction(query_dsl=current_query_dsl)
+            refined_query = self.refiner(
+                nl_query=nl_query,
+                es_schema=es_schema,
+                failed_query_dsl=current_query_dsl,
+                feedback=response['feedback'],
+            )
             current_query_dsl = refined_query.query_dsl
         
-        return current_query_dsl
+        return dspy.Prediction(query_dsl=current_query_dsl)
 class NLToQuerySignature(dspy.Signature):
     """
     Convert a natural language query into an Elasticsearch Query DSL format.

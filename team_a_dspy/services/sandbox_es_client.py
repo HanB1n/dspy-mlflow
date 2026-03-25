@@ -1,5 +1,6 @@
 from services.es_client import ESClient
 from services.config import settings
+from elasticsearch import BadRequestError
 
 class SandboxESClient(ESClient):
     """
@@ -25,13 +26,27 @@ class SandboxESClient(ESClient):
         else:
             query = query_dsl
         
-        response = self.es.indices.validate_query(
-            index=self.index,
-            body=query,
-            explain=True
-        )
-
-        return {
-        "is_valid": response.body.get("valid", False),
-        "feedback": response.body.get("explanations", response.body.get("error", "No explanation provided"))
-        }
+        try:
+            response = self.es.search(index=self.index, body=query)
+            failed_shards = response.body.get("_shards", {}).get("failed", 0)
+            if failed_shards:
+                failures = response.body.get("_shards", {}).get("failures", [])
+                return {
+                    "is_valid": False,
+                    "feedback": f"Shard failures detected: {failures}",
+                }
+            return {
+                "is_valid": True,
+                "feedback": "Query executed successfully in sandbox Elasticsearch.",
+            }
+        except BadRequestError as exc:
+            error_text = str(exc)
+            return {
+                "is_valid": False,
+                "feedback": error_text,
+            }
+        except Exception as exc:
+            return {
+                "is_valid": False,
+                "feedback": f"Unexpected validation error: {exc}",
+            }

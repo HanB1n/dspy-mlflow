@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from services.config import settings
+from services.es_client import ESClient
 from services.sandbox_es_client import SandboxESClient
 from signatures.schema_interpreter import PlanSchemaRetriver
 from signatures.judge_relevance import RelevanceScorerSignature
@@ -16,9 +17,9 @@ class JudgeDSPY:
     """
     def __init__(
             self,
-            sandbox_es_client: SandboxESClient,
+            es_client: ESClient | SandboxESClient,
     ):
-        self.es_client = sandbox_es_client
+        self.es_client = es_client
         self.lm = dspy.LM(
             base_url=settings.llm_base_url,
             model=f"openai/{settings.llm_model_name}",

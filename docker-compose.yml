@@ -50,6 +50,24 @@ services:
       - "5000:5000"
     env_file:
       - .env
+    volumes:
+      - ./team_b_mlflow/tracking:/mlflow/tracking
+      - ./team_b_mlflow/artifacts:/mlflow/artifacts
+    command:
+      [
+        "mlflow",
+        "server",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "5000",
+        "--backend-store-uri",
+        "sqlite:////mlflow/tracking/mlflow.db",
+        "--default-artifact-root",
+        "/mlflow/artifacts",
+        "--allowed-hosts",
+        "*"
+      ]
 
 networks:
   dspy-mlflow-network:
