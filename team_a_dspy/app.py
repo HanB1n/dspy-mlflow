@@ -78,6 +78,11 @@ class QueryResponse(BaseModel):
     query_dsl: dict
 
 
+class MetricEvaluationRequest(BaseModel):
+    query_text: str
+    query_dsl: dict
+
+
 @app.post("/generate_query", response_model=QueryResponse, dependencies=[Depends(require_dev_mode)])
 async def generate_query(
     query: QueryRequest,
@@ -98,7 +103,7 @@ async def evaluate_query(
 ):
     start_time = time.perf_counter()
     with mlflow.start_run(run_name="evaluate_query"):
-        evaluation_result = dspy_judge.evaluate_query_dsl(generated_query_dsl=query.query_dsl)
+        evaluation_result = dspy_judge._evaluate_query_dsl_syntax(generated_query_dsl=query.query_dsl)
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
         mlflow.log_metric("is_valid", 1 if evaluation_result.get("is_valid") else 0)
     return evaluation_result
@@ -118,6 +123,46 @@ async def search(
         mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
         mlflow.log_metric("hits_count", len(hits))
     return search_results
+
+@app.post("/search_and_aggregate", response_model=dict)
+async def search_and_aggregate(
+    query: QueryRequest,
+    dspy_client: DSPYClient = Depends(get_dspy_client),
+    es_client: ESClient = Depends(get_es_client),
+    judge_dspy: JudgeDSPY = Depends(get_dspy_judge)
+):
+    start_time = time.perf_counter()
+    with mlflow.start_run(run_name="search_and_aggregate"):
+        query_dsl = dspy_client.generate_query_dsl(query.query_text)
+        search_results = es_client.search(query_dsl=query_dsl)
+        docs = search_results.get("hits", {}).get("hits", [])
+        aggregations = judge_dspy._aggregate_es_documents(docs)
+        mlflow.log_param("query_text", query.query_text)
+        mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_metric("aggregations_count", len(aggregations))
+    return aggregations
+
+@app.post("/evaluate_relevance", response_model=dict)
+async def evaluate_relevance(
+    query: QueryRequest,
+    dspy_client: DSPYClient = Depends(get_dspy_client),
+    es_client: ESClient = Depends(get_es_client),
+    judge_dspy: JudgeDSPY = Depends(get_dspy_judge)
+):
+    start_time = time.perf_counter()
+    with mlflow.start_run(run_name="evaluate_relevance"):
+        query_dsl = dspy_client.generate_query_dsl(query.query_text)
+        search_results = es_client.search(query_dsl=query_dsl)
+        docs = search_results.get("hits", {}).get("hits", [])
+        aggregations = judge_dspy._aggregate_es_documents(docs)
+        print(docs)
+        print(aggregations)
+        relevance_evaluation = judge_dspy.compute_relevance_score(nl_query=query.query_text, aggregation=aggregations)
+        mlflow.log_param("query_text", query.query_text)
+        mlflow.log_metric("latency_ms", (time.perf_counter() - start_time) * 1000)
+        mlflow.log_metric("relevance_score", relevance_evaluation.get("relevance_score", 0))
+    return relevance_evaluation
+
 
 @app.get("/initialize", dependencies=[Depends(require_dev_mode)])
 async def initialize(

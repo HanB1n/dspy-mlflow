@@ -15,12 +15,19 @@ class SandboxESClient(ESClient):
         
         Args:
             query_dsl (dict): The generated Elasticsearch Query DSL to be validated.
+                Can be either wrapped as {"query_dsl": {...}} or raw DSL directly.
         Returns:
             dict: A dictionary containing the validation results, including whether the query is valid and any feedback or error messages from Elasticsearch.
         """
+        # Handle both wrapped ("query_dsl" key) and unwrapped (raw DSL) formats
+        if "query_dsl" in query_dsl:
+            query = query_dsl["query_dsl"]
+        else:
+            query = query_dsl
+        
         response = self.es.indices.validate_query(
             index=self.index,
-            body=query_dsl.get("query_dsl", {}),
+            body=query,
             explain=True
         )
 

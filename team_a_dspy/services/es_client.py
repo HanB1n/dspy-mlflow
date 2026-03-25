@@ -108,10 +108,17 @@ class ESClient:
         
         Args:
             query_dsl (dict): The Elasticsearch Query DSL to be executed.
+                Can be either wrapped as {"query_dsl": {...}} or raw DSL directly.
         Returns:
             dict: The search results returned by Elasticsearch.
         """
-        query = query_dsl.get("query_dsl", {})
+        # Handle both wrapped ("query_dsl" key) and unwrapped (raw DSL) formats
+        if "query_dsl" in query_dsl:
+            query = query_dsl["query_dsl"]
+        else:
+            # Assume it's already the query DSL
+            query = query_dsl
+        
         response = self.es.search(index=self.index, body=query)
         return response.body
     

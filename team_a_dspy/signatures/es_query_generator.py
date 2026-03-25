@@ -19,7 +19,7 @@ class NLToQueryDSL(dspy.Module):
         current_query_dsl = generated_query.query_dsl
         print(f"Reasoning trace for query generation:{generated_query.reasoning}")
 
-        response = self.dspy_judge.evaluate_query_dsl(current_query_dsl)
+        response = self.dspy_judge._evaluate_query_dsl_syntax(current_query_dsl)
 
         for attempt in range(3):
             print(f"Validation attempt {attempt+1}: is_valid={response['is_valid']}, feedback={response['feedback']}")
